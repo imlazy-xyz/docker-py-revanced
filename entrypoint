@@ -5,4 +5,10 @@ set -o pipefail
 set -o nounset
 
 
+# The prebuilt image can ship a newer cloakbrowser than requirements.txt pins (0.7.x needs a license key), so honor the pin at start.
+cloakbrowser_pin=$(grep -E '^cloakbrowser==' requirements.txt || true)
+if [ -n "${cloakbrowser_pin}" ]; then
+  python -m pip install --no-cache-dir --quiet "${cloakbrowser_pin}"
+fi
+
 python main.py
