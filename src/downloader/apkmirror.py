@@ -30,6 +30,9 @@ CLOAK_REQUEST_TIMEOUT_MS = request_timeout * 1000
 # script and Cloudflare's passive `/cdn-cgi/challenge-platform/scripts/jsd/main.js` beacon, so those strings made
 # fully loaded pages (title, variants table and all) look like challenges and every lookup failed. Genuine
 # interstitials are still caught by their title/body text and `cf-chl` tokens below.
+# Cloudflare's interstitial keeps polling, so "networkidle" times out while it is still solving; wait for its title to clear.
+CLOAK_CHALLENGE_WAIT_MS = 45_000
+CLOAK_CHALLENGE_CLEARED_JS = "() => !/just a moment|attention required/i.test(document.title)"
 CLOAK_CHALLENGE_MARKERS = (
     "attention required",
     "cf-chl",
@@ -63,6 +66,14 @@ class ApkMirror(Downloader):
         return launch, PlaywrightTimeoutError
 
     @staticmethod
+    def _wait_for_challenge_to_clear(page: Any, playwright_timeout_error: Any) -> None:
+        """Give Cloudflare's auto-solving interstitial time to hand off to the real page."""
+        try:
+            page.wait_for_function(CLOAK_CHALLENGE_CLEARED_JS, timeout=CLOAK_CHALLENGE_WAIT_MS)
+        except playwright_timeout_error:
+            logger.debug("Cloudflare interstitial was still showing after waiting for it to clear.")
+
+    @staticmethod
     def _extract_source_with_cloak(url: str, cause: Exception | None = None) -> str:
         """Fetch APKMirror HTML through CloakBrowser when cloudscraper receives a challenge page."""
         launch_browser, playwright_timeout_error = ApkMirror._cloak_dependencies(url, cause)
@@ -76,6 +87,7 @@ class ApkMirror(Downloader):
                 page.wait_for_load_state("networkidle", timeout=CLOAK_NETWORK_IDLE_TIMEOUT_MS)
             except playwright_timeout_error:
                 logger.debug(f"Timed out waiting for APKMirror network idle after CloakBrowser loaded {url}.")
+            ApkMirror._wait_for_challenge_to_clear(page, playwright_timeout_error)
             source = cast("str", page.content())
         finally:
             browser.close()
@@ -121,6 +133,7 @@ class ApkMirror(Downloader):
                 page.wait_for_load_state("networkidle", timeout=CLOAK_NETWORK_IDLE_TIMEOUT_MS)
             except playwright_timeout_error:
                 logger.debug(f"Timed out waiting for APKMirror referer network idle before downloading {file_name}.")
+            self._wait_for_challenge_to_clear(page, playwright_timeout_error)
 
             with page.expect_download(timeout=CLOAK_REQUEST_TIMEOUT_MS) as download_info:
                 # Triggering a same-page anchor preserves browser download behavior better than raw HTTP.
