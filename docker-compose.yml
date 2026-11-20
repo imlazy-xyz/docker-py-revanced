@@ -7,3 +7,5 @@ services:
       - .env
     volumes:
       - .:/app:z
+      # The prebuilt image bakes in its own /entrypoint; mount ours so repo changes (e.g. the cloakbrowser pin) apply.
+      - ./entrypoint:/entrypoint:z
