@@ -258,7 +258,28 @@ class APP(object):
             extension = pathlib.Path(url).suffix
             file_name = APP.generate_filename(url) + extension
         Downloader(config).direct_download(url, file_name)
+        if tag == "latest":
+            tag = APP._content_versioned_tag(tag, config.temp_folder.joinpath(file_name))
         return tag, file_name
+
+    @staticmethod
+    def _content_versioned_tag(tag: str, file_path: pathlib.Path) -> str:
+        """Append a content digest to an untagged ("latest") resource so rolling URLs expose real updates.
+
+        Rolling URLs such as ``https://api.revanced.app/v5/patches.rvp`` always resolve to the tag ``latest``, so the
+        update check would see ``latest`` == ``latest`` forever. A short digest of the downloaded file changes exactly
+        when the content does. Dots (no dashes) keep the tag parseable by the ``PatchVersion...-PatchSet`` regex.
+        """
+        try:
+            digest = hashlib.sha256()
+            with file_path.open("rb") as resource:
+                for chunk in iter(lambda: resource.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError:
+            # Dry runs and failed downloads leave no file; keep the plain tag instead of failing the build.
+            logger.debug(f"Could not hash {file_path}; keeping tag {tag}.")
+            return tag
+        return f"{tag}.{digest.hexdigest()[:12]}"
 
     def _setup_download_tasks(self: Self) -> list[tuple[str, str, None, str]]:
         """Setup download tasks for CLI and patch bundles."""

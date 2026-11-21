@@ -4,6 +4,7 @@
 # ruff: noqa: PT009
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Lock
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Self, cast
@@ -56,3 +57,26 @@ class AppCachingTests(TestCase):
         expected_cache = {"https://example.test/resource.jar": ("cached-tag", "cached.jar")}
         self.assertEqual(expected_cache, cached_resources)
         self.assertEqual({"file_name": "resource.jar", "version": "v1.0.0"}, app.resource["cli"])
+
+
+class ContentVersionedTagTests(TestCase):
+    """Rolling URLs resolve to the tag `latest`, so the tag must reflect the downloaded content."""
+
+    def test_latest_tag_changes_when_content_changes(self: Self) -> None:
+        """Different bytes behind the same rolling URL must produce different tags."""
+        with TemporaryDirectory() as folder:
+            bundle = Path(folder, "patches.rvp")
+            bundle.write_bytes(b"patches v1")
+            first = APP._content_versioned_tag("latest", bundle)  # noqa: SLF001
+            bundle.write_bytes(b"patches v2")
+            second = APP._content_versioned_tag("latest", bundle)  # noqa: SLF001
+            bundle.write_bytes(b"patches v2")
+            repeat = APP._content_versioned_tag("latest", bundle)  # noqa: SLF001
+
+        self.assertNotEqual(first, second)
+        self.assertEqual(second, repeat)
+        self.assertRegex(first, r"^latest\.[0-9a-f]{12}$")
+
+    def test_missing_file_keeps_plain_tag(self: Self) -> None:
+        """Dry runs leave no file, which must not fail the build."""
+        self.assertEqual("latest", APP._content_versioned_tag("latest", Path("/nonexistent/x.rvp")))  # noqa: SLF001
